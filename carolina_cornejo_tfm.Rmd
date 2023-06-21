@@ -123,8 +123,8 @@ unzip("shapefiles/priogrid.zip", exdir = "shapefiles/")
 
 # Load data
 Objects ending with "_full" usually refer to the whole period of time (1980-2021).
-Objects ending with "_peak" usually refer to the peak period of violence (1980-1999).
-Objects ending with "_trough" usually refer to the trough period of violence (2000-2021).
+Objects ending with "_peak" usually refer to the peak period of violence (1980-2000).
+Objects ending with "_trough" usually refer to the trough period of violence (2001-2021).
 
 ## Load shapefiles
 
@@ -142,6 +142,7 @@ st_crs(sh_national_borders)
 Both are in EPSG:4326. This is going to be the CRS of all spatial objects.
 
 ```{r st_intersection}
+# execute spatial overlay to keep only grids within Peruvian territory
 sh_peru <- st_intersection(
   sh_grid,
   sh_national_borders)
@@ -151,6 +152,7 @@ st_crs(sh_peru)
 ```
 
 ```{r}
+# plot the grids
 map_grids <- mapview(sh_peru, 
         map.types = "OpenStreetMap",
         layer.name = "Grids",
@@ -201,7 +203,7 @@ df_gtd_full <- st_as_sf(df_gtd_full,
 plot(df_gtd_full$geometry)
 ```
 
-Since we have both the Peru and the attacks data let’s make a quick map.
+Since the Peru and the attacks data are now loaded, let’s make a quick map.
 
 ```{r}
 mapview(
@@ -314,9 +316,9 @@ Variables:  https://grid.prio.org/#/download
 
 The variable `drug_y` had many NAs, which later greatly affected the execution of the algorithms. The data source provides information on cannabis, coca and opium cultivation worldwide, although only coca cultivation corresponds to Peruvian territory. By mapping this information and contrasting it with other sources of information, I concluded that it was not the case that there was no information on the other grids, but that in fact drugs are not grown in them. Therefore, and only after reaching this conclusion, I proceeded to replace the NA with 0. 
 
-I could not reach to the same conclusion regarding the `excluded` variable, which also had a lot of NAs.
+I could not reach to the same conclusion regarding the `excluded` variable, which also had NAs.
 
-Although they may seem static, there are some variables that do change over the years, which is why we chose to use the average for each period.
+Although they may seem static, there are some variables that do change over the years, which is why I chose to use the average for each period.
 
 ```{r prio whole period dataset}
 df_prio <- read_csv("data/prio.csv")
@@ -369,7 +371,7 @@ df_prio_peak <- df_prio %>%
     )
   )
 
-# Turn all NaN into NA
+# turn all NaN into NA
 df_prio_peak <- df_prio_peak %>%
   mutate_all(~ifelse(is.nan(.),
                      NA, .))
@@ -398,7 +400,7 @@ df_prio_trough <- df_prio %>%
     )
   )
 
-# Turn all NaN into NA
+# turn all NaN into NA
 df_prio_trough <- df_prio_trough %>%
   mutate_all(~ifelse(is.nan(.),
                      NA, .))
@@ -446,7 +448,7 @@ df_xsub_full <- df_xsub %>%
               na.rm = TRUE)
           )
 
-# Turn all NaN into NA
+# turn all NaN into NA
 df_xsub_full <- df_xsub_full %>%
   mutate_all(~ifelse(is.nan(.),
                      NA, .))
@@ -469,7 +471,7 @@ df_xsub_peak <- df_xsub %>%
               na.rm = TRUE)
           )
 
-# Turn all NaN into NA
+# turn all NaN into NA
 df_xsub_peak <- df_xsub_peak %>%
   mutate_all(~ifelse(is.nan(.),
                      NA, .))
@@ -491,7 +493,7 @@ df_xsub_trough <- df_xsub %>%
               na.rm = TRUE)
           )
 
-# Turn all NaN into NA
+# turn all NaN into NA
 df_xsub_trough <- df_xsub_trough %>%
   mutate_all(~ifelse(is.nan(.),
                      NA, .))
@@ -623,7 +625,7 @@ attacks_agg_full <- attacks_agg_full %>%
   summarize(number_attacks = sum(number_attacks))
 ```
 
-It is needed to keep all rows in `sh_attrs_full` (keep all grids) to use `left_join(sh_attrs_full, attacks_agg_full)`. I assigned the results to a new data set called `sf_attrs_attacks`. The spatial data for `attacks_agg_full` will not be useful anymore, and it will cause problems with the join if kept.
+It is needed to keep all rows in `sh_attrs_full` (keep all grids) to use `left_join(sh_attrs_full, attacks_agg_full)`. I assigned the results to a new data set called `sf_attrs_attacks`. The geometry column for `attacks_agg_full` will not be useful anymore, and it will cause problems with the join if kept.
 
 ```{r delete geometry in attacks_agg}
 attacks_agg_full$geometry <- NULL 
@@ -893,8 +895,6 @@ sem_peak <- spatialreg::errorsarlm(
 summary(sem_peak)
 ```
 
-- Lambda is not significant. So, there is no significant evidence of residual spatial autocorrelation.
-- No predictor seem significantly associated with the number of attacks in the grids, although `elev_mean` is just above the o.05 threshold (p = 0.059).
 
 ## SAR -  Spatial Autoregressive Model
 
@@ -908,9 +908,6 @@ sar_peak <- lagsarlm(
 
 summary(sar_peak)
 ```
-
-- Rho is positive, but not statistically significant. So, this model does not show spatial autocorrelation.
-- No predictor is significant, meaning they are not associated with the number of attacks per grid.
 
 ## LM - Linear model
 
@@ -949,7 +946,7 @@ print(paste0(length(which(df_peak$number_attacks == 0)),
 ```
 
 ```{r}
-a <- ggplot(df_peak, aes(x = number_attacks)) +
+ggplot(df_peak, aes(x = number_attacks)) +
   geom_histogram(bins = 30,
            fill = blood,
            color = "black") +
@@ -958,7 +955,7 @@ a <- ggplot(df_peak, aes(x = number_attacks)) +
        subtitle = "1980 - 2000",
        x = "Number of attacks", 
        y = "Number of grids")
-a
+
 # ggsave("figs/zero_grids.png")
 ```
 
@@ -1027,8 +1024,6 @@ AIC(zeroinf_1_peak, zeroinf_2_peak)
 
 # 2001 - 2021 (trough period)
 
-Here it should be noted that there are far fewer attacks, which further inflates the number of zeros. During the entire period 1980-2021, there were 5808 attacks, of which during the peak period there were 5720 and in this period there were only 88.
-
 ## Moran's test
 
 ```{r}
@@ -1061,7 +1056,6 @@ sem_trough <- spatialreg::errorsarlm(
 summary(sem_trough)
 ```
 
-Here, the spatial autoregressive coefficient _lambda_ is significant.
 
 ## SAR -  Spatial Autoregressive Model
 
@@ -1075,9 +1069,6 @@ sar_trough <- lagsarlm(
 
 summary(sar_trough)
 ```
-
-Rho is significant. 
-
 
 ## LM - Linear model
 
@@ -1165,7 +1156,6 @@ AIC(zeroinf_1_trough, zeroinf_2_trough)
 ```
 
 
-
 # 1980 - 2021 (full period)
 
 ## Moran's test
@@ -1177,8 +1167,6 @@ moran_full <- moran.test(
 
 moran_full
 ```
-
-Moran's I of 0.032 rejects spatial randomness. Since it is positive, it indicates spatial clustering; negative indicates uniformity. This implies grids with more/less attacks are located near each other. P-value is very small, suggesting these results are significant: there is no spatial randomness. 
 
 ```{r}
 moran.plot(df_full$number_attacks, 
@@ -1199,8 +1187,6 @@ sem_full <- spatialreg::errorsarlm(
 
 summary(sem_full)
 ```
-- There is no significant predictor at the 0.005 level. `elev_mean` seems somewhat significant at the 0.10 level.
-- Lambda is the estimated spatial error parameter. In this case, it is large, but not statistically significant. So, there is no significant evidence of residual spatial autocorrelation.
 
 ## SAR -  Spatial Autoregressive Model
 
@@ -1216,10 +1202,6 @@ sar_full <- lagsarlm(
 
 summary(sar_full)
 ```
-
-- Seems like none of the predictors are statistically significant.
-- While Rho seems not to be statistically significant as indicated by the Likelihood Ratio test (p = 0.6544), and the asymptotic t-test (p = 0.67765). So, it seems that in this model, to add the spatial lag does not improve de model. 
-
 
 ## LM - Linear model
 
@@ -1355,7 +1337,7 @@ modelsummary(models_full,
              statistic = c("p.value", "stars"))
 ```
 
-# Latex tables for the report
+# Latex tables for the pdf thesis
 
 ```{r}
 coef_names <- c(
@@ -1391,13 +1373,6 @@ coef_names_z1 <- c(
     "zero_wlms_nlang"     = "Zero No of local langs"
 )
 ```
-
-```{r}
-gs <- list(
-  list("raw" = "nobs", "clean" = "$n$")
-)
-```
-
 
 ```{r}
 # All sem models
@@ -1486,9 +1461,13 @@ modelsummary(models_zeroinf2,
 ```
 
 
-#...
+# References in this .Rmd
 
-```{r}
+Bivand, R. S., Pebesma, E., & Gómez-Rubio, V. (2013). Applied Spatial Data Analysis with R. Springer New York. https://doi.org/10.1007/978-1-4614-7618-4
 
-```
+Kaplan, J. (2022). Crime by the Numbers: A Criminologist’s Guide to R. CrimRxiv. https://doi.org/10.21428/cb6ab371.a51bf4c1
+
+Urdinez, F., & Cruz, A. (2020). R for political data science: A practical guide. Taylor and Francis.
+
+Walker, K. (2023). Analyzing US Census Data: Methods, Maps, and Models in R (1st ed.). Chapman and Hall/CRC. https://doi.org/10.1201/9780203711415
 
