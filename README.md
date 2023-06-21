@@ -4,8 +4,10 @@ This repository contains the Rmd file, datasets and shapefiles used in the maste
 
 ## Abstract
 > The present thesis investigates the spatial diffusion of terrorist attacks in Peru during three temporalities: the peak of violence (1980-2000), its decline (2000-2021), and the entire period (1980-2021). To study the relationships between the occurrence of terrorist attacks and geographic features, three grid-cell level datasets are constructed with which Moran's _I_ tests and different spatial (spatial error and spatial autoregressive) and non-spatial (linear and negative binomial) models were applied. The findings reveal that spatial autocorrelation of attacks is more pronounced during the decline period. Moreover, the effects of certain spatial variables on the number of terrorist attacks vary across time periods and models, sometimes even reversing their impact.
-
-<img src="figs/map_full.png)" width=50%>
+<br>
+<p align="center">
+  <img src="figs/map_full.png" width="350" title="attacks in Peru">
+</p>
 
 ## Usage
 Clone the repository in your local drive. Then, set it as the workspace. As part of the Rmd code, the `.zip` files that contain the datasets and shapefiles will be extracted. Besides, the code itself will install the necessary packages that are not already installed.
