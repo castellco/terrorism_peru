@@ -1,1 +1,1 @@
-# terrorism_peru
+# Spatial dependence in terrorist attacks in Peru

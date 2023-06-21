@@ -1,0 +1,1494 @@
+---
+title: "TFM"
+author: "Carolina Cornejo Castellano"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+# Libraries
+
+```{r libraries, message=FALSE, warning=FALSE}
+libraries <- c(
+  "tidyverse",
+  "data.table",
+  "ggplot2",
+  "sf",
+  "sp",
+  "sfdep",
+  "spdep",
+  "xSub",
+  "raster",
+  "rgdal",
+  "mapdata",
+  "janitor",
+  "spatialreg",
+  "mapview", 
+  "webshot",
+  "caret",
+  "pscl",
+  "MASS",
+  "VGAM",
+  "lmtest",
+  "modelsummary",
+  "huxtable"
+  )
+# install (in case they are not already installed) and load libraries
+for (lib in libraries) {
+  if (!requireNamespace(lib, quietly = TRUE)) {
+    install.packages(lib)
+  }
+  suppressPackageStartupMessages(library(lib, character.only = TRUE))
+}
+# remove vector and iterator
+rm(lib, libraries)
+```
+
+# Custom options 
+
+```{r deactivate scientific notation}
+options(scipen = 999)
+```
+
+```{r ggplot theme}
+blood <- "#B20000"
+
+theme_terror <- function() {
+
+theme_minimal() +
+
+# background
+theme(panel.background = element_rect(fill = "white", 
+                                      color = NA),
+      plot.background = element_rect(fill = "#F4F4F4")) +
+    
+# margins
+# theme(plot.margin = margin(20, 20, 25, 15)) + # trbl
+    
+theme(plot.margin = 
+        unit(c(0.5, 0.4, 0.5, 0.65), "cm")) + # trbl
+
+# title and subtitle
+theme(plot.title = element_text(color = blood, 
+                                size = 13, 
+                                face = "bold", 
+                                hjust = 0.5,
+                                margin = margin(0,0,5,0))) + # trbl
+
+theme(plot.subtitle = element_text(color = "#282828",  
+                               size = 11,  
+                               hjust = 0.5,
+                               margin = margin(0,0,15,0))) + # trbl
+    
+# axis text
+theme(axis.text = element_text(color = "#282828", 
+                               size = 10)) +
+
+# axis titles
+theme(axis.title = element_text(color = blood, 
+                                size = 11)) +
+    
+theme(axis.title.x = element_text(margin = margin(5,0,0,0))) +  # trbl
+    
+theme(axis.title.y = element_text(margin = margin(0,10,0,-5))) + # trbl
+    
+# legend
+theme(legend.position = "bottom",
+      legend.title = element_text(size = 10),
+      legend.background = element_rect(color = "#E0E0E0"),
+      legend.key = element_rect(color = NA),
+      legend.key.size = unit(0.3, "cm"),
+      legend.text = element_text(color = "#282828", 
+                                 size = 9)) +
+
+# facet labels
+theme(strip.text = element_text(color = blood, 
+                                size = 12, 
+                                face = "bold")) +
+
+# grid lines
+theme(panel.grid.major = element_line(color = "#E0E0E0", 
+                                      size = 0.15),
+panel.grid.minor = element_blank())
+  }
+```
+
+```{r unzip datasets}
+unzip("data/data.zip", exdir = "data/")
+unzip("shapefiles/peru.zip", exdir = "shapefiles/")
+unzip("shapefiles/priogrid.zip", exdir = "shapefiles/")
+```
+
+
+# Load data
+Objects ending with "_full" usually refer to the whole period of time (1980-2021).
+Objects ending with "_peak" usually refer to the peak period of violence (1980-1999).
+Objects ending with "_trough" usually refer to the trough period of violence (2000-2021).
+
+## Load shapefiles
+
+```{r load peru and grid shapefiles}
+sh_grid <- 
+  st_read("shapefiles/priogrid/priogrid_cell.shp")
+
+sh_national_borders <- st_geometry(
+  st_read("shapefiles/peru/peru.shp"))
+
+st_crs(sh_grid)
+st_crs(sh_national_borders)
+```
+
+Both are in EPSG:4326. This is going to be the CRS of all spatial objects.
+
+```{r st_intersection}
+sh_peru <- st_intersection(
+  sh_grid,
+  sh_national_borders)
+
+plot(sh_peru$geometry)
+st_crs(sh_peru)
+```
+
+```{r}
+map_grids <- mapview(sh_peru, 
+        map.types = "OpenStreetMap",
+        layer.name = "Grids",
+        col.regions = "gray",
+        lwd = 2, 
+        col = blood
+        )
+map_grids
+```
+
+```{#r}
+mapshot(map_grids, 
+        file = "figs/map_grids.png", 
+        vwidth = 480, 
+        vheight = 510)
+```
+
+
+## Load GTD dataset
+
+```{r df_gtd}
+# load both datasets, combine them, and select relevant variables.
+df_gtd_full <- rbind(fread("data/gtd_1970_2020.csv"), 
+                     fread("data/gtd_ene_jun_2021.csv")) %>% 
+  filter(country == 159, # filter only Peru
+         iyear >= 1980) %>% 
+  dplyr::select(
+    eventid,
+    iyear,
+    longitude,
+    latitude,
+    summary,
+    attacktype1_txt,
+    targtype1_txt,
+    nkill,
+    weaptype1_txt
+        )
+
+# delete rows without lot and lat
+df_gtd_full <- df_gtd_full[!is.na(df_gtd_full$longitude) & 
+                             !is.na(df_gtd_full$latitude),]
+
+# turn GTD into sf object:
+df_gtd_full <- st_as_sf(df_gtd_full, 
+                        coords = c("longitude", "latitude"), 
+                        crs = 4326)
+
+plot(df_gtd_full$geometry)
+```
+
+Since we have both the Peru and the attacks data let’s make a quick map.
+
+```{r}
+mapview(
+  sh_peru, 
+  layer.name = "Grids",
+  col.regions = "gray",
+  legend = T,
+  map.types = "OpenStreetMap"
+  ) +
+mapview(
+  df_gtd_full,
+  col.regions = blood,
+  cex = "nkill",
+  legend = T,
+  layer.name = "Attacks 1980-2021"
+)
+```
+
+Subset GTD data according to periods:
+
+```{r}
+df_gtd_peak <- df_gtd_full %>% 
+  filter(
+    iyear <= 2000
+  )
+```
+
+```{r}
+df_gtd_trough <- df_gtd_full %>% 
+  filter(
+    iyear >= 2001
+  )
+```
+
+```{r}
+df_gtd_full$target_group <- ifelse(
+  df_gtd_full$targtype1_txt %in% c(
+    "Business", "Government (General)",
+    "Private Citizens & Property", "Police"), 
+  df_gtd_full$targtype1_txt, "Others")
+
+df_gtd_full %>%
+  ggplot(aes(x = target_group, 
+             fill = target_group)) +
+  geom_bar() +
+  labs(x = "Targets", y = "Count", 
+       title = "Target types", 
+       subtitle = "1980-2021",
+       fill = "Targets") +
+  theme_terror() +
+  theme(axis.text.x = element_blank()) +
+  theme(axis.title.x = element_blank()) +
+  facet_wrap(vars(iyear)) +
+  scale_fill_manual(values = c("gray50", "red", "gray70", blood, "gray90"))
+
+df_gtd_full$target_group <- NULL
+```
+
+```{r}
+df_gtd_full$attack_type_group <- ifelse(
+  df_gtd_full$attacktype1_txt %in% c(
+    "Bombing/Explosion", "Armed Assault",
+    "Assassination", "Facility/Infrastructure Attack"), 
+  df_gtd_full$attacktype1_txt, "Others")
+
+df_gtd_full %>%
+  ggplot(aes(x = attack_type_group, 
+             fill = attack_type_group)) +
+  geom_bar() +
+  labs(y = "Count", 
+       title = "Attack types", 
+       subtitle = "1980-2021",
+       fill = "Attack types") +
+  theme_terror() +
+  theme(axis.text.x = element_blank()) +
+  theme(axis.title.x = element_blank()) +
+  facet_wrap(vars(iyear)) +
+  scale_fill_manual(values = c("gray50", "red", "gray70", blood, "gray90"))
+
+df_gtd_full$attack_type_group <- NULL
+```
+
+```{r}
+df_gtd_full$weapon_group <- ifelse(
+  df_gtd_full$weaptype1_txt %in% c(
+    "Explosives", "Firearms",
+    "Incendiary", "Melee"), 
+  df_gtd_full$weaptype1_txt, "Others")
+
+df_gtd_full %>%
+  ggplot(aes(x = weapon_group, 
+             fill = weapon_group)) +
+  geom_bar() +
+  labs(y = "Count", 
+       title = "Weapon types", 
+       subtitle = "1980-2021",
+       fill = "Weapons") +
+  theme_terror() +
+  theme(axis.text.x = element_blank()) +
+  theme(axis.title.x = element_blank()) +
+  facet_wrap(vars(iyear)) +
+  scale_fill_manual(values = c("gray50", "red", "gray70", blood, "gray90"))
+
+df_gtd_full$weapon_group <- NULL
+```
+
+## Load PRIO dataset
+
+Variables:  https://grid.prio.org/#/download
+
+The variable `drug_y` had many NAs, which later greatly affected the execution of the algorithms. The data source provides information on cannabis, coca and opium cultivation worldwide, although only coca cultivation corresponds to Peruvian territory. By mapping this information and contrasting it with other sources of information, I concluded that it was not the case that there was no information on the other grids, but that in fact drugs are not grown in them. Therefore, and only after reaching this conclusion, I proceeded to replace the NA with 0. 
+
+I could not reach to the same conclusion regarding the `excluded` variable, which also had a lot of NAs.
+
+Although they may seem static, there are some variables that do change over the years, which is why we chose to use the average for each period.
+
+```{r prio whole period dataset}
+df_prio <- read_csv("data/prio.csv")
+ 
+df_prio$drug_y[is.na(df_prio$drug_y)] <- 0
+
+df_prio_full <- df_prio %>%
+  group_by(gid) %>%
+  summarize(
+    bdist3 = mean(bdist3,
+      na.rm = TRUE
+    ),
+    capdist = mean(capdist,
+      na.rm = TRUE
+    ),
+    drug_y = mean(drug_y,
+      na.rm = TRUE
+    ),
+    excluded = mean(excluded,
+      na.rm = TRUE
+    )
+  )
+
+# Turn all NaN into NA
+df_prio_full <- df_prio_full %>%
+  mutate_all(~ifelse(is.nan(.),
+                     NA, .))
+```
+
+```{r prio peak dataset}
+
+df_prio_peak <- df_prio %>%
+  group_by(gid) %>%
+  summarize(
+    bdist3 = mean(
+      ifelse(year <= 2000, bdist3, NA),
+      na.rm = TRUE
+    ),
+    capdist = mean(
+      ifelse(year <= 2000, capdist, NA),
+      na.rm = TRUE
+    ),
+    drug_y = mean(
+      ifelse(year <= 2000, drug_y, NA),
+      na.rm = TRUE
+    ),
+    excluded = mean(
+      ifelse(year <= 2000, excluded, NA),
+      na.rm = TRUE
+    )
+  )
+
+# Turn all NaN into NA
+df_prio_peak <- df_prio_peak %>%
+  mutate_all(~ifelse(is.nan(.),
+                     NA, .))
+```
+
+
+```{r prio trough dataset}
+df_prio_trough <- df_prio %>%
+  group_by(gid) %>%
+  summarize(
+    bdist3 = mean(
+      ifelse(year >= 2001, bdist3, NA),
+      na.rm = TRUE
+    ),
+    capdist = mean(
+      ifelse(year >= 2001, capdist, NA),
+      na.rm = TRUE
+    ),
+    drug_y = mean(
+      ifelse(year >= 2001, drug_y, NA),
+      na.rm = TRUE
+    ),
+    excluded = mean(
+      ifelse(year >= 2001, excluded, NA),
+      na.rm = TRUE
+    )
+  )
+
+# Turn all NaN into NA
+df_prio_trough <- df_prio_trough %>%
+  mutate_all(~ifelse(is.nan(.),
+                     NA, .))
+```
+
+## Load xSub dataset
+
+Variables: https://cross-sub.org/about/variables-included
+
+```{#r download xSub dataset}
+get_xSub(data_source = "GED",
+         country_iso3 = "PER", # only info for Peru
+         space_unit = "priogrid",
+         time_unit = "year",
+         out_dir = "data/")
+```
+
+```{r xsub whole period dataset}
+df_xsub <- read_csv("data/xSub_GED_PER_priogrid_year.csv") %>%
+dplyr::select(
+  PRIO_GID,
+  YEAR,
+  ELEV_MEAN,
+  OPEN_TERRAIN,
+  WLMS_NLANG
+)
+
+# variables to lower case
+df_xsub <- clean_names(df_xsub)
+
+# rename prio_gid to only "gid"
+names(df_xsub)[1] <- "gid"
+
+df_xsub_full <- df_xsub %>%
+  group_by(gid) %>%
+  summarize(
+            elev_mean = mean(
+              elev_mean, 
+              na.rm = TRUE),
+            open_terrain = mean(
+              open_terrain, 
+              na.rm = TRUE),
+            wlms_nlang = mean(
+              wlms_nlang, 
+              na.rm = TRUE)
+          )
+
+# Turn all NaN into NA
+df_xsub_full <- df_xsub_full %>%
+  mutate_all(~ifelse(is.nan(.),
+                     NA, .))
+
+```
+
+
+```{r xsub peak dataset}
+df_xsub_peak <- df_xsub %>%
+  group_by(gid) %>%
+  summarize(
+            elev_mean = mean(
+              ifelse(year <= 2000, elev_mean, NA),
+              na.rm = TRUE),
+            open_terrain = mean(
+              ifelse(year <= 2000, open_terrain, NA), 
+              na.rm = TRUE),
+            wlms_nlang = mean(
+              ifelse(year <= 2000, wlms_nlang, NA),
+              na.rm = TRUE)
+          )
+
+# Turn all NaN into NA
+df_xsub_peak <- df_xsub_peak %>%
+  mutate_all(~ifelse(is.nan(.),
+                     NA, .))
+```
+
+
+```{r xsub trough dataset}
+df_xsub_trough <- df_xsub %>%
+  group_by(gid) %>%
+  summarize(
+            elev_mean = mean(
+              ifelse(year >= 2001, elev_mean, NA),
+              na.rm = TRUE),
+            open_terrain = mean(
+              ifelse(year >= 2001, open_terrain, NA), 
+              na.rm = TRUE),
+            wlms_nlang = mean(
+              ifelse(year >= 2001, wlms_nlang, NA),
+              na.rm = TRUE)
+          )
+
+# Turn all NaN into NA
+df_xsub_trough <- df_xsub_trough %>%
+  mutate_all(~ifelse(is.nan(.),
+                     NA, .))
+```
+
+So far, `df_prio_*` datasets have information of all the grids in the world, and `df_gtd_*` and `df_xsub_*` have information only of the grids within the Peruvian territory.
+
+## Introductory overview of the attacks
+
+Before doing more transformations on the data, lets visualize the 3 time ranges:
+
+```{r mapview 1980 - 2021}
+map_full <- mapview(
+  sh_peru, 
+  layer.name = "Grids",
+  col.regions = "gray",
+  legend = T,
+  map.types = "OpenStreetMap"
+  ) +
+mapview(
+  df_gtd_full,
+  col.regions = blood,
+  cex = "nkill",
+  legend = T,
+  layer.name = "Attacks 1980-2021"
+)
+
+map_full
+```
+
+```{r mapview 1980 - 2000}
+map_peak <- mapview(
+  sh_peru, 
+  layer.name = "Grids",
+  col.regions = "gray",
+  legend = T,
+  map.types = "OpenStreetMap"
+  ) +
+mapview(
+  df_gtd_peak,
+  col.regions = blood,
+  cex = "nkill",
+  legend = T,
+  layer.name = "Attacks 1980-2000"
+)
+
+map_peak
+```
+
+```{r mapview 2001 - 2021}
+map_trough <- mapview(
+  sh_peru, 
+  layer.name = "Grids",
+  col.regions = "gray",
+  legend = T,
+  map.types = "OpenStreetMap"
+  ) +
+mapview(
+  df_gtd_trough,
+  col.regions = blood,
+  cex = "nkill",
+  legend = T,
+  layer.name = "Attacks 2001-2021"
+)
+
+map_trough
+```
+
+```{#r save mapview plots}
+# to save these mapview as pngs
+# webshot::install_phantomjs() # needs to be installed only once
+mapshot(map_full, 
+        file = "figs/map_full.png", 
+        vwidth = 480, 
+        vheight = 510)
+
+mapshot(map_peak, 
+        file = "figs/map_peak.png",
+        vwidth = 480, 
+        vheight = 510)
+
+mapshot(map_trough, 
+        file = "figs/map_trough.png",
+        vwidth = 480, 
+        vheight = 510)
+```
+
+## Create joint datasets
+
+### Whole period 
+
+```{r joins}
+# subset grid variables within Peru's borders
+sh_1 <- dplyr::left_join(sh_peru,
+  df_prio_full,
+  by = "gid"
+)
+
+# merge with xSub Peru's data
+sh_attrs_full <- dplyr::left_join(sh_1,
+  df_xsub_full,
+  by = "gid"
+)
+
+names(sh_attrs_full)
+```
+
+The following process is replicated as seen in Walker (2023) and Kaplan (2022). It is needed to get a count of the attacks per grid. The `st_join()` function matches each attack to its corresponding grid. Here, the order of arguments is important: the attacks data is used first to aggregate at the attack level.
+
+```{r points-in-polygon join}
+attacks_agg_full <- st_join(
+  df_gtd_full,
+  sh_attrs_full
+)
+```
+
+There is no variable available with the number of attacks, so it needs to be created. The variable "number_attacks" is assigned a value of 1 since each row represents only one attack.
+
+```{r}
+attacks_agg_full$number_attacks <- 1
+```
+
+Now it is possible to aggregate the data and assign the results back into `attacks_agg_full`.
+
+```{r attacks aggregation}
+# this should substantially trim rows, dropping grid cells lacking attack data
+attacks_agg_full <- attacks_agg_full %>% 
+  group_by(gid) %>% 
+  summarize(number_attacks = sum(number_attacks))
+```
+
+It is needed to keep all rows in `sh_attrs_full` (keep all grids) to use `left_join(sh_attrs_full, attacks_agg_full)`. I assigned the results to a new data set called `sf_attrs_attacks`. The spatial data for `attacks_agg_full` will not be useful anymore, and it will cause problems with the join if kept.
+
+```{r delete geometry in attacks_agg}
+attacks_agg_full$geometry <- NULL 
+```
+
+Now it is possible to do the join. Since this will be the data frame in use from now on, it will be given a shorter name: `df_full`.
+
+```{r}
+df_full <- left_join(sh_attrs_full,
+                attacks_agg_full,
+                by = "gid")
+
+# replace NAs with 0, because those are grids without attacks
+df_full$number_attacks[ is.na(df_full$number_attacks) ] <- 0
+```
+
+```{r}
+ggplot(df_full, aes(x = number_attacks)) +
+  geom_histogram(bins = 30,
+           fill = blood,
+           color = "black") +
+  theme_terror() +
+  labs(title = "Terrorist attacks in Peru",
+       subtitle = "1980 - 2021",
+       x = "Number of attacks", 
+       y = "Number of grids")
+```
+
+### Peak period
+
+Same process as before.
+
+```{r}
+# subset grid variables within Peru's borders
+sh_1 <- dplyr::left_join(sh_peru,
+  df_prio_peak,
+  by = "gid"
+)
+
+# merge with xSub Peru's data
+sh_attrs_peak <- dplyr::left_join(sh_1,
+  df_xsub_peak,
+  by = "gid"
+)
+
+attacks_agg_peak <- st_join(
+  df_gtd_peak,
+  sh_attrs_peak
+)
+
+attacks_agg_peak$number_attacks <- 1
+
+attacks_agg_peak <- attacks_agg_peak %>% 
+  group_by(gid) %>% 
+  summarize(number_attacks = sum(number_attacks))
+
+attacks_agg_peak$geometry <- NULL
+
+df_peak <- left_join(sh_attrs_peak,
+                attacks_agg_peak,
+                by = "gid")
+
+# replace NAs with 0
+df_peak$number_attacks[ is.na(df_peak$number_attacks) ] <- 0
+```
+
+```{r}
+ggplot(df_peak, aes(x = number_attacks)) +
+  geom_histogram(bins = 30,
+           fill = blood,
+           color = "black") +
+  theme_terror() +
+  labs(title = "Terrorist attacks in Peru",
+       subtitle = "1980 - 2000",
+       x = "Number of attacks", 
+       y = "Number of grids")
+```
+
+### Trough period
+
+Same process. 
+
+```{r}
+# subset grid variables within Peru's borders
+sh_1 <- dplyr::left_join(sh_peru,
+  df_prio_trough,
+  by = "gid"
+)
+
+# merge with xSub Peru's data
+sh_attrs_trough <- dplyr::left_join(sh_1,
+  df_xsub_trough,
+  by = "gid"
+)
+
+# create temporal df to aggregate attacks numbers
+attacks_agg_trough <- st_join(
+  df_gtd_trough,
+  sh_attrs_trough
+)
+
+attacks_agg_trough$number_attacks <- 1
+
+# aggregate attacks 
+attacks_agg_trough <- attacks_agg_trough %>% 
+  group_by(gid) %>% 
+  summarize(number_attacks = sum(number_attacks))
+
+attacks_agg_trough$geometry <- NULL
+
+df_trough <- left_join(sh_attrs_trough,
+                attacks_agg_trough,
+                by = "gid")
+
+# replace NAs with 0
+df_trough$number_attacks[ is.na(df_trough$number_attacks) ] <- 0
+```
+
+```{r}
+ggplot(df_trough, aes(x = number_attacks)) +
+  geom_histogram(bins = 30,
+           fill = blood,
+           color = "black") +
+  theme_terror() +
+  labs(title = "Terrorist attacks in Peru",
+       subtitle = "2001 - 2021",
+       x = "Number of attacks", 
+       y = "Number of grids")
+```
+
+```{r declutter environment}
+rm(list = setdiff(ls(), c(
+  "df_full", "df_peak", "df_trough", # master datasets
+  "theme_terror", "blood", # ggplot theme and custom color
+  "sh_grid", "sh_national_borders",
+  "map_full", "map_peak", "map_trough") 
+    )
+  ) 
+gc() # free memory
+```
+
+# Neighborhoods
+
+The process of creating neighborhoods and weights will only be needed once, regardless of the period, so the data frame for the whole period will be used. `queen = TRUE` means that regions are considered neighbors if they share a common boundary point or corner. 
+
+```{r neighborhoods}
+nb <- poly2nb(df_full,
+             queen = TRUE)
+
+summary(nb)
+```
+
+This shows that:
+
+- On average, the grids in Peru have 7.03 neighbors, 
+- there is 1 no-neighbor observation,
+- there are 6 least connected regions with only one link each; and
+- there are 357 most connected regions, with 8 links each.
+
+The fact that there are 1 no-neighbor observation can be problematic. Keeping the no-neighbor grid raises questions about the relevant size of n when testing for autocorrelation, among other issues. (Bivand, 2013). It was checked internally that in the three data frames it appears that the row with no-neighbors is 191.
+
+```{r}
+# delete row with no neighbors
+df_full <- df_full[-191,]
+df_peak <- df_peak[-191,]
+df_trough <- df_trough[-191,]
+
+# compute neighbors again
+nb <- poly2nb(df_full,
+             queen = TRUE)
+
+summary(nb)
+```
+These new neighbors show that:
+
+- On average, the grids in Peru have 7.04 neighbors; and
+- there is no no-neighbor observation
+
+Neighborhood relationships can be visualized with red lines connecting each polygon with its neighbors: 
+
+```{r}
+plot(df_full$geometry) 
+plot(nb,
+     coords = st_coordinates(st_centroid(df_full)), 
+     add = TRUE, 
+     col = blood, 
+     points = FALSE)
+```
+
+```{r}
+# see row indices of some random neighbors, as examples
+nb[[1]]
+nb[[255]]
+nb[[510]]
+```
+
+# Weights
+
+```{r weights for whole period}
+lw <- nb2listw(nb, 
+               style = "W") 
+lw
+```
+
+`style = "W"` makes the weights for each polygon standardised to sum to unity. This is also called _row standardisation_.
+
+```{r}
+lw$weights[[1]]
+lw$weights[[255]]
+lw$weights[[510]]
+```
+
+For example: 
+- Given that the grid at row index 1 has 1 neighbor, it is assigned the weight 1.
+- Given that the grid at row index 255 has 8 neighbors, each is assigned the weight 0.125.
+- Given that the grid at row index 510 has 3 neighbors, each is assigned the weight 0.3333333.
+
+
+# 1980 - 2000 (peak period)
+
+## Moran's test
+
+```{r}
+moran_peak <- moran.test(
+df_peak$number_attacks,
+listw = lw)
+
+moran_peak
+```
+
+The result of Moran’s I test shows that "there is a slight positive correlation relationship, versus an expectation of a slight negative relationship" (as interpreted by Urdinez & Cruz, 2020, in a similar case). The very small p-value indicates that these results are statistically significant.
+
+So, it can be said that the number of attacks show certain spatial autocorrelation when analyzing the data at the grid level (paraphrasing Urdinez & Cruz, 2020).
+
+```{r}
+moran.plot(df_peak$number_attacks, 
+           listw = lw,
+           xlab = "Number of attacks",
+           ylab = "Number of attacks (spatially lagged)")
+```
+
+## SEM - Spatial Error Model
+
+```{r}
+# formula for all models
+formula <- formula(paste0(
+      "number_attacks ~ 
+        bdist3 + 
+        capdist + 
+        drug_y + 
+        excluded + 
+        elev_mean + 
+        open_terrain + 
+        wlms_nlang"
+))
+```
+
+
+```{r}
+sem_peak <- spatialreg::errorsarlm(
+  formula = formula,
+  data = df_peak, 
+  listw = lw,
+  na.action = na.omit, 
+  zero.policy = T) 
+
+summary(sem_peak)
+```
+
+- Lambda is not significant. So, there is no significant evidence of residual spatial autocorrelation.
+- No predictor seem significantly associated with the number of attacks in the grids, although `elev_mean` is just above the o.05 threshold (p = 0.059).
+
+## SAR -  Spatial Autoregressive Model
+
+```{r}
+sar_peak <- lagsarlm(
+  formula = formula,
+  data = df_peak, 
+  listw = lw,
+  na.action = na.omit,
+  zero.policy = TRUE)
+
+summary(sar_peak)
+```
+
+- Rho is positive, but not statistically significant. So, this model does not show spatial autocorrelation.
+- No predictor is significant, meaning they are not associated with the number of attacks per grid.
+
+## LM - Linear model
+
+```{r}
+lm_peak <- lm(
+      formula = formula,
+      data = df_peak
+    )
+
+summary(lm_peak)
+```
+
+## NB - Negative Binomial regression
+
+```{r message=FALSE, warning=FALSE}
+negbin_peak <- glm.nb(
+  formula = formula, 
+  data = df_peak, 
+  init.theta = 0.2319233539,
+  na.action = na.omit)
+
+summary(negbin_peak)
+```
+
+## ZIP Zero-inflated Poisson models
+
+Would a Poisson be suitable? Poisson regression assumes constant mean and variance.
+
+```{r}
+mean(df_peak$number_attacks)
+var(df_peak$number_attacks)
+print(paste0(length(which(df_peak$number_attacks == 0)), 
+             " out of ", 
+             nrow(df_full), 
+             " grids had 0 attacks."))
+```
+
+```{r}
+a <- ggplot(df_peak, aes(x = number_attacks)) +
+  geom_histogram(bins = 30,
+           fill = blood,
+           color = "black") +
+  theme_terror() +
+  labs(title = "Attacks by grid",
+       subtitle = "1980 - 2000",
+       x = "Number of attacks", 
+       y = "Number of grids")
+a
+# ggsave("figs/zero_grids.png")
+```
+
+
+```{r}
+# this assumes the factors influencing the mean count and the excess zeros are the same
+
+zeroinf_1_peak <- zeroinfl(
+  formula = number_attacks ~ 
+        bdist3 + ## predictors for the Poisson process
+        capdist + 
+        drug_y + 
+        excluded + 
+        elev_mean + 
+        open_terrain + 
+        wlms_nlang |
+          bdist3 + ## predictors for the Bernoulli process
+          capdist + 
+          drug_y + 
+          excluded + 
+          elev_mean + 
+          open_terrain + 
+          wlms_nlang,
+      data = df_peak,
+  dist = "poisson", 
+  link = "logit",
+  na.action = na.omit
+  )
+
+summary(zeroinf_1_peak)
+```
+
+
+```{r}
+# this assumes different factors influence the mean count vs. the probability of having a zero
+
+zeroinf_2_peak <- zeroinfl(
+  formula = number_attacks ~ 
+        bdist3 + 
+        capdist + 
+        drug_y + 
+        excluded + 
+        elev_mean + 
+        open_terrain + 
+        wlms_nlang |
+        1,
+      data = df_peak,
+  dist = "poisson", 
+  link = "logit",
+  na.action = na.omit
+  )
+
+summary(zeroinf_2_peak)
+```
+
+To compare the two zero-inflated models:
+
+```{r}
+lrtest(zeroinf_1_peak, zeroinf_2_peak)
+```
+
+```{r}
+AIC(zeroinf_1_peak, zeroinf_2_peak)
+```
+
+
+# 2001 - 2021 (trough period)
+
+Here it should be noted that there are far fewer attacks, which further inflates the number of zeros. During the entire period 1980-2021, there were 5808 attacks, of which during the peak period there were 5720 and in this period there were only 88.
+
+## Moran's test
+
+```{r}
+moran_trough <- moran.test(
+  df_trough$number_attacks,
+  listw = lw)
+
+moran_trough
+```
+
+- Moran's results are positive and greater than the expectation under spatial randomness, with a very small p-value. The null hypothesis that there is zero spatial autocorrelation can be rejected. In other words, in the trough period, grids with similar number of attacks tend to be spatially clustered.
+
+```{r}
+moran.plot(df_trough$number_attacks, 
+           listw = lw,
+           xlab = "Number of attacks",
+           ylab = "Number of attacks (spatially lagged)")
+```
+
+## SEM - Spatial Error Model
+
+```{r}
+sem_trough <- spatialreg::errorsarlm(
+  formula = formula,
+  data = df_trough, 
+  listw = lw,
+  na.action = na.omit, 
+  zero.policy = T) 
+
+summary(sem_trough)
+```
+
+Here, the spatial autoregressive coefficient _lambda_ is significant.
+
+## SAR -  Spatial Autoregressive Model
+
+```{r}
+sar_trough <- lagsarlm(
+  formula = formula,
+  data = df_trough, 
+  listw = lw,
+  na.action = na.omit,
+  zero.policy = TRUE)
+
+summary(sar_trough)
+```
+
+Rho is significant. 
+
+
+## LM - Linear model
+
+```{r}
+lm_trough <- lm(
+      formula = formula,
+      data = df_trough
+    )
+
+summary(lm_trough)
+```
+
+## NB Negative Binomial regression
+
+```{r message=FALSE, warning=FALSE}
+negbin_trough <- glm.nb(
+  formula = formula, 
+  data = df_trough, 
+  na.action = na.omit)
+
+summary(negbin_trough)
+```
+
+
+## ZIP Zero-inflated Poisson model
+
+```{r}
+# this assumes the factors influencing the mean count and the excess zeros are the same
+
+zeroinf_1_trough <- zeroinfl(
+  formula = number_attacks ~ 
+        bdist3 + ## predictors for the Poisson process
+        capdist + 
+        drug_y + 
+        excluded + 
+        elev_mean + 
+        open_terrain + 
+        wlms_nlang |
+          bdist3 + ## predictors for the Bernoulli process
+          capdist + 
+          drug_y + 
+          excluded + 
+          elev_mean + 
+          open_terrain + 
+          wlms_nlang,
+      data = df_trough,
+  dist = "poisson", 
+  link = "logit",
+  na.action = na.omit
+  )
+
+summary(zeroinf_1_trough)
+```
+
+```{r}
+# this assumes different factors influence the mean count vs. the probability of having a zero
+
+zeroinf_2_trough <- zeroinfl(
+  formula = number_attacks ~ 
+        bdist3 + 
+        capdist + 
+        drug_y + 
+        excluded + 
+        elev_mean + 
+        open_terrain + 
+        wlms_nlang |
+        1,
+      data = df_trough,
+  dist = "poisson", 
+  link = "logit",
+  na.action = na.omit
+  )
+
+summary(zeroinf_2_trough)
+```
+
+To compare the two zero-inflated models:
+
+```{r}
+lrtest(zeroinf_1_trough, zeroinf_2_trough)
+```
+
+```{r}
+AIC(zeroinf_1_trough, zeroinf_2_trough)
+```
+
+
+
+# 1980 - 2021 (full period)
+
+## Moran's test
+
+```{r}
+moran_full <- moran.test(
+  df_full$number_attacks,
+  listw = lw)
+
+moran_full
+```
+
+Moran's I of 0.032 rejects spatial randomness. Since it is positive, it indicates spatial clustering; negative indicates uniformity. This implies grids with more/less attacks are located near each other. P-value is very small, suggesting these results are significant: there is no spatial randomness. 
+
+```{r}
+moran.plot(df_full$number_attacks, 
+           listw = lw,
+           xlab = "Number of attacks",
+           ylab = "Number of attacks (spatially lagged)")
+```
+
+## SEM - Spatial Error Model
+
+```{r}
+sem_full <- spatialreg::errorsarlm(
+  formula = formula,
+  data = df_full, 
+  listw = lw,
+  na.action = na.omit, # it was needed because there was no default for handling NAs
+  zero.policy = T) # empty neighbors found. It was needed to set zero.policy = T
+
+summary(sem_full)
+```
+- There is no significant predictor at the 0.005 level. `elev_mean` seems somewhat significant at the 0.10 level.
+- Lambda is the estimated spatial error parameter. In this case, it is large, but not statistically significant. So, there is no significant evidence of residual spatial autocorrelation.
+
+## SAR -  Spatial Autoregressive Model
+
+Spatial lag models account [...] for spatial spillover effects – the possibility that values in neighboring areas have an influence on values in a given location. (Walker, 2023)
+
+```{r}
+sar_full <- lagsarlm(
+  formula = formula,
+  data = df_full, 
+  listw = lw,
+  na.action = na.omit,
+  zero.policy = TRUE)
+
+summary(sar_full)
+```
+
+- Seems like none of the predictors are statistically significant.
+- While Rho seems not to be statistically significant as indicated by the Likelihood Ratio test (p = 0.6544), and the asymptotic t-test (p = 0.67765). So, it seems that in this model, to add the spatial lag does not improve de model. 
+
+
+## LM - Linear model
+
+A linear model for count data is not that suitable. 
+
+```{r}
+lm_full <- lm(
+      formula = formula,
+      data = df_full
+    )
+
+summary(lm_full)
+```
+
+## NB Negative Binomial regression
+
+```{r message=FALSE, warning=FALSE}
+negbin_full <- glm.nb(
+  formula = formula, 
+  data = df_full, 
+  init.theta = 0.2319233539,
+  na.action = na.omit)
+
+summary(negbin_full)
+```
+
+## ZIP Zero-inflated Poisson model
+
+```{r}
+# this assumes the factors influencing the mean count and the excess zeros are the same
+
+zeroinf_1_full <- zeroinfl(
+  formula = number_attacks ~ 
+        bdist3 + ## predictors for the Poisson process
+        capdist + 
+        drug_y + 
+        excluded + 
+        elev_mean + 
+        open_terrain + 
+        wlms_nlang |
+          bdist3 + ## predictors for the Bernoulli process
+          capdist + 
+          drug_y + 
+          excluded + 
+          elev_mean + 
+          open_terrain + 
+          wlms_nlang,
+      data = df_full,
+  dist = "poisson", 
+  link = "logit",
+  na.action = na.omit
+  )
+
+summary(zeroinf_1_full)
+```
+
+```{r}
+# this assumes different factors influence the mean count vs. the probability of having a zero
+
+zeroinf_2_full <- zeroinfl(
+  formula = number_attacks ~ 
+        bdist3 + 
+        capdist + 
+        drug_y + 
+        excluded + 
+        elev_mean + 
+        open_terrain + 
+        wlms_nlang |
+        1,
+      data = df_full,
+  dist = "poisson", 
+  link = "logit",
+  na.action = na.omit
+  )
+
+summary(zeroinf_2_full)
+```
+
+The two zero-inflated models can be compared using the Likelihood ratio test:
+
+```{r}
+lrtest(zeroinf_1_full, zeroinf_2_full)
+```
+
+```{r}
+AIC(zeroinf_1_full, zeroinf_2_full)
+```
+
+
+# Summary tables
+
+```{r}
+models_peak <- list(
+  "LM 1980-2000" = lm_peak,
+  "SEM 1980-2000" = sem_peak,
+  "SAR 1980-2000" = sar_peak,
+  "Zinf Pois. 1 1980-2000" = zeroinf_1_peak,
+  "Zinf Pois. 2 1980-2000" = zeroinf_2_peak
+)
+
+modelsummary(models_peak, 
+             output = "huxtable",
+              statistic = c("p.value", "stars"))
+```
+
+```{r}
+models_trough <- list(
+  # "Moran's I test 2000-2021" = moran_trough, # modelsummary does not work with Moran's
+  "LM 2001-2021" = lm_trough,
+  "SEM 2001-2021" = sem_trough,
+  "SAR 2001-2021" = sar_trough,
+  "Zinf Pois. 1 2001-2021" = zeroinf_1_peak,
+  "Zinf Pois. 2 2001-2021" = zeroinf_2_peak
+)
+
+modelsummary(models_trough, 
+             output = "huxtable",
+             statistic = c("p.value", "stars"))
+```
+
+```{r}
+models_full <- list(
+  # "Moran's I test 1980-2021" = moran_full, # modelsummary does not work with Moran's
+  "LM 1980-2021" = lm_full,
+  "SEM 1980-2021" = sem_full,
+  "SAR 1980-2021" = sar_full,
+  "Zinf Pois. 1 1980-2021" = zeroinf_1_full,
+  "Zinf Pois. 2 1980-2021" = zeroinf_2_full
+)
+
+modelsummary(models_full, 
+             output = "huxtable",
+             statistic = c("p.value", "stars"))
+```
+
+# Latex tables for the report
+
+```{r}
+coef_names <- c(
+        "number_attacks" = "Attacks", 
+        "bdist3" = "Dist to borders", 
+        "capdist" = "Dist to capital", 
+        "drug_y" = "Coca cultiv.", 
+        "excluded" = "Ethnic groups", 
+        "elev_mean" = "Avg elevation", 
+        "open_terrain" = "Open land prop.", 
+        "wlms_nlang" = "No of local langs"
+)
+```
+
+
+```{r}
+coef_names_z1 <- c(
+    "count_(Intercept)"   = "Count Intercept",
+    "count_bdist3"        = "Count Dist to borders", 
+    "count_capdist"       = "Count Dist to capital", 
+    "count_drug_y"        = "Count Coca cultiv.", 
+    "count_excluded"      = "Count Ethnic groups", 
+    "count_elev_mean"     = "Count Avg elevation", 
+    "count_open_terrain"  = "Count Open land prop.", 
+    "count_wlms_nlang"    = "Count No of local langs",
+    "zero_(Intercept)"    = "Zero Intercept",
+    "zero_bdist3"         = "Zero Dist to borders", 
+    "zero_capdist"        = "Zero Dist to capital", 
+    "zero_drug_y"         = "Zero Coca cultiv.", 
+    "zero_excluded"       = "Zero Ethnic groups", 
+    "zero_elev_mean"      = "Zero Avg elevation", 
+    "zero_open_terrain"   = "Zero Open land prop.", 
+    "zero_wlms_nlang"     = "Zero No of local langs"
+)
+```
+
+```{r}
+gs <- list(
+  list("raw" = "nobs", "clean" = "$n$")
+)
+```
+
+
+```{r}
+# All sem models
+models_sem <- list(
+  "Peak (1980-00)" = sem_peak,
+  "Trough (2001-21)" = sem_trough,
+  "Full (1980-21)" = sem_full
+)
+
+modelsummary(models_sem, 
+             output = "latex",
+             estimate = "{estimate}{stars}",
+             coef_rename = coef_names,
+  add_n = TRUE)
+```
+
+```{r}
+# All sar models
+models_sar <- list(
+  "Peak (1980-00)" = sar_peak,
+  "Trough (2001-21)" = sar_trough,
+  "Full (1980-21)" = sar_full
+)
+
+modelsummary(models_sar, 
+             output = "latex",
+             estimate = "{estimate}{stars}",
+             coef_rename = coef_names)
+```
+
+```{r}
+# All LM models
+models_lm <- list(
+  "Peak (1980-00)" = lm_peak,
+  "Trough (2001-21)" = lm_trough,
+  "Full (1980-21)" = lm_full
+)
+
+modelsummary(models_lm, 
+             output = "latex",
+             estimate = "{estimate}{stars}",
+             coef_rename = coef_names)
+```
+
+```{r}
+# All NB models
+models_negbin <- list(
+  "Peak (1980-00)" = negbin_peak,
+  "Trough (2001-21)" = negbin_trough,
+  "Full (1980-21)" = negbin_full
+)
+
+modelsummary(models_negbin, 
+             output = "latex",
+             estimate = "{estimate}{stars}",
+             coef_rename = coef_names)
+```
+
+
+```{r}
+# All zero inf 1 models
+models_zeroinf1 <- list(
+  "Peak (1980-00)" = zeroinf_1_peak,
+  "Trough (2001-21)" = zeroinf_1_trough,
+  "Full (1980-21)" = zeroinf_1_full
+)
+
+modelsummary(models_zeroinf1, 
+             output = "latex",
+             estimate = "{estimate}{stars}",
+             coef_rename = coef_names_z1)
+```
+
+```{r}
+# All zero inf 2 models
+models_zeroinf2 <- list(
+  "Peak (1980-00)" = zeroinf_2_peak,
+  "Trough (2001-21)" = zeroinf_2_trough,
+  "Full (1980-21)" = zeroinf_2_full
+)
+
+modelsummary(models_zeroinf2, 
+             output = "latex",
+             estimate = "{estimate}{stars}",
+             coef_rename = coef_names_z1)
+```
+
+
+#...
+
+```{r}
+
+```
+
