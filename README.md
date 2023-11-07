@@ -1,6 +1,6 @@
 # Exploring terrorism in Peru: A spatial approach
 
-This repository contains the Rmd file, datasets and shapefiles used in the master's thesis "Exploring terrorism in Peru: A spatial approach", by G. Carolina Cornejo Castellano as part of the Master in Computational Social Sciences (MUCSS), 2022- 2023, at the Universidad Carlos III de Madrid.
+This repository contains the Rmd file, datasets and shapefiles used in the master's thesis "Exploring terrorism in Peru: A spatial approach" as part of the Master in Computational Social Sciences (MUCSS), 2022- 2023, at the Universidad Carlos III de Madrid.
 
 ## Abstract
 > The present thesis investigates the spatial diffusion of terrorist attacks in Peru during three temporalities: the peak of violence (1980-2000), its decline (2000-2021), and the entire period (1980-2021). To study the relationships between the occurrence of terrorist attacks and geographic features, three grid-cell level datasets are constructed with which Moran's _I_ tests and different spatial (spatial error and spatial autoregressive) and non-spatial (linear and negative binomial) models were applied. The findings reveal that spatial autocorrelation of attacks is more pronounced during the decline period. Moreover, the effects of certain spatial variables on the number of terrorist attacks vary across time periods and models, sometimes even reversing their impact.
