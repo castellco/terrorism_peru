@@ -30,5 +30,5 @@ University of Maryland, U. (n.d.). Overview of the GTD. Retrieved January 15, 20
 
 University of Michigan, U.-M. (n.d.). xSub. Retrieved June 19, 2023, from https://cross-sub.org/
 
-Please review the .pdf thesis to find the remaining references.
+Please, review the .pdf thesis to find the remaining references.
 
